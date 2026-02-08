@@ -42,3 +42,7 @@ _build
 
 **/assets/
 artifacts/
+AGENT.md
+
+
+datasets/
