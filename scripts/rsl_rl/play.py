@@ -12,14 +12,28 @@ import cli_args  # isort: skip
 
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
-parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
-parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument(
-    "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
+    "--video", action="store_true", default=False, help="Record videos during training."
 )
-parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
+parser.add_argument(
+    "--video_length",
+    type=int,
+    default=200,
+    help="Length of the recorded video (in steps).",
+)
+parser.add_argument(
+    "--disable_fabric",
+    action="store_true",
+    default=False,
+    help="Disable fabric and use USD I/O operations.",
+)
+parser.add_argument(
+    "--num_envs", type=int, default=None, help="Number of environments to simulate."
+)
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
-parser.add_argument("--motion_file", type=str, default=None, help="Path to the motion file.")
+parser.add_argument(
+    "--motion_file", type=str, default=None, help="Path to the motion file."
+)
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -59,14 +73,24 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 
 # Import extensions to set up environment tasks
 import whole_body_tracking.tasks  # noqa: F401
-from whole_body_tracking.utils.exporter import attach_onnx_metadata, export_motion_policy_as_onnx
+from whole_body_tracking.utils.exporter import (
+    attach_onnx_metadata,
+    export_motion_policy_as_onnx,
+)
 
 
 @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
-def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
+def main(
+    env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg,
+    agent_cfg: RslRlOnPolicyRunnerCfg,
+):
     """Play with RSL-RL agent."""
-    agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
-    env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+    agent_cfg: RslRlOnPolicyRunnerCfg = cli_args.parse_rsl_rl_cfg(
+        args_cli.task, args_cli
+    )
+    env_cfg.scene.num_envs = (
+        args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
+    )
 
     # specify directory for logging experiments
     log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
@@ -103,15 +127,26 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         if art is None:
             print("[WARN] No model artifact found in the run.")
         else:
-            env_cfg.commands.motion.motion_file = str(pathlib.Path(art.download()) / "motion.npz")
+            env_cfg.commands.motion.motion_file = str(
+                pathlib.Path(art.download()) / "motion.npz"
+            )
 
     else:
         print(f"[INFO] Loading experiment from directory: {log_root_path}")
-        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+        resume_path = get_checkpoint_path(
+            log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint
+        )
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
 
+        # Apply motion file from CLI if provided
+        if args_cli.motion_file is not None:
+            print(f"[INFO]: Using motion file from CLI: {args_cli.motion_file}")
+            env_cfg.commands.motion.motion_file = args_cli.motion_file
+
     # create isaac environment
-    env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
+    env = gym.make(
+        args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None
+    )
 
     log_dir = os.path.dirname(resume_path)
 
@@ -135,7 +170,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env = RslRlVecEnvWrapper(env)
 
     # load previously trained model
-    ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+    ppo_runner = OnPolicyRunner(
+        env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device
+    )
     ppo_runner.load(resume_path)
 
     # obtain the trained policy for inference
@@ -144,16 +181,26 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # export policy to onnx/jit
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
 
+    # Get normalizer (compatible with different rsl_rl versions)
+    normalizer = getattr(ppo_runner, "obs_normalizer", None) or getattr(
+        ppo_runner.alg, "normalizer", None
+    )
+
     export_motion_policy_as_onnx(
         env.unwrapped,
         ppo_runner.alg.policy,
-        normalizer=ppo_runner.obs_normalizer,
+        normalizer=normalizer,
         path=export_model_dir,
         filename="policy.onnx",
     )
-    attach_onnx_metadata(env.unwrapped, args_cli.wandb_path if args_cli.wandb_path else "none", export_model_dir)
+    attach_onnx_metadata(
+        env.unwrapped,
+        args_cli.wandb_path if args_cli.wandb_path else "none",
+        export_model_dir,
+    )
     # reset environment
-    obs, _ = env.get_observations()
+    obs_result = env.get_observations()
+    obs = obs_result[0] if isinstance(obs_result, tuple) else obs_result
     timestep = 0
     # simulate environment
     while simulation_app.is_running():
@@ -161,6 +208,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         with torch.inference_mode():
             # agent stepping
             actions = policy(obs)
+            # Ensure actions is 2D
+            if actions.dim() == 1:
+                actions = actions.unsqueeze(0)
             # env stepping
             obs, _, _, _ = env.step(actions)
         if args_cli.video:
